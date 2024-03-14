@@ -1,0 +1,30 @@
+import kyo._
+import scala.compiletime.ops.any
+
+// Int < Options
+// String < (Options & IOs)
+
+val a: Int < Any = 1
+val b: Int = a.pure
+
+def example1(
+    a: Int < Options,
+    b: Int < Aborts[Exception]
+): Int < (Options & Aborts[Exception]) =
+  a.flatMap(v => b.map(_ + v))
+
+// But using only `map` is recommended
+// since it funcions like `flatMap` due
+// to effect widening.
+def example2(
+    a: Int < Options,
+    b: Int < Aborts[Exception]
+): Int < (Options & Aborts[Exception]) =
+  a.map(v => b.map(_ + v))
+
+// An example computation that
+// produces 'Unit'.
+val a: Unit < IOs = IOs(println("hello"))
+
+// Use 'andThen'.
+val b: String < IOs = a.andThen("test")

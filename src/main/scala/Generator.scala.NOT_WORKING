@@ -1,0 +1,47 @@
+// 출처
+// https://gist.github.com/kitlangton/e262ef3f83855f03dee27ebab4474275?permalink_comment_id=4982797
+
+class Generators[Input: Tag, Output: Tag] extends Effect[Generators[Input, Output]]:
+  override type Command[A] = Generators.Yield[Input, A]
+
+object Generators:
+  case class Yield[Input, Output](value: Input)
+
+  def yield_[Input: Tag, Output: Tag](value: Input): Output < Generators[Input, Output] =
+    Generators[Input, Output].suspend(Yield(value))
+
+  def run[Input: Tag, Output: Tag, T, S](
+      value: T < (Generators[Input, Output] & S)
+  )(
+      handler: Input => Output < S
+  ): T < S =
+    val h = new SimpleHandler[Yield[Input, *], Generators[Input, Output]]:
+      def apply[T, U, S](command: Yield[Input, T], k: T => U < (Generators[Input, Output] & S)): U < S =
+        this.handle(
+          handler(command.value)
+            .map(output => k(output.asInstanceOf[T]))
+            .asInstanceOf[U < (Generators[Input, Output] & S)]
+        )
+    h.handle(value)
+
+object GeneratorsDemo extends App:
+  val program: Int < (Generators[String, Int] & Envs[String]) =
+    for
+      n1     <- Generators.yield_("Hello")
+      n2     <- Generators.yield_("World")
+      string <- Envs.get[String]
+      n3     <- Generators.yield_(s"ENV: $string")
+    yield n1 + n2 + n3
+
+  val p1 = Generators.run(program) { string =>
+    println(string)
+    string.length
+  }
+  val p2: Int < Any = Envs.run("Kit")(p1)
+  println(p2)
+
+// OUTPUTS:
+// Hello
+// World
+// ENV: Kit
+// 18

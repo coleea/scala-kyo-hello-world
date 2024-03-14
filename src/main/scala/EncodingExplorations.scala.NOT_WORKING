@@ -1,0 +1,156 @@
+// 출처
+// https://gist.github.com/kitlangton/e262ef3f83855f03dee27ebab4474275?permalink_comment_id=4982797
+
+package zero
+
+import izumi.reflect.Tag
+import Kyo.*
+import scala.collection.View.FlatMap
+
+type Id[T]    = T
+type Const[T] = [U] =>> T
+type MX[T]    = Any
+
+//////////////
+// KYO CORE //
+//////////////
+
+opaque type <[+T, -S] >: T = T | Kyo[T, S]
+
+implicit inline def convert[T, S](zero: Kyo[T, S]): T < S = zero
+
+extension [T, S](self: T < S) //
+  inline def map[U, S2](f: T => U < S2): U < (S & S2) = flatMap(f)
+
+  def flatMap[U, S2](k: T => U < S2): U < (S & S2) =
+    def flatMapLoop(v: T < S): U < (S & S2) =
+      v match
+        case kyo: Suspend[MX, Any, T, S] @unchecked =>
+          new Continue[MX, Any, U, S & S2](kyo):
+            def apply(v: Any) = flatMapLoop(kyo(v))
+        case v: T @unchecked =>
+          k(v)
+    flatMapLoop(self)
+
+  def when(cond: Boolean): Any < S =
+    if cond then self else ()
+
+sealed abstract class Kyo[+T, -S]
+
+object Kyo:
+  sealed abstract class Suspend[Command[_], T, U, S] extends Kyo[U, S] with Function1[T, U < S]:
+    def command: Command[T]
+    def tag: Tag[?]
+    def isRoot: Boolean
+    def apply(v: T): U < S
+  end Suspend
+
+  class Root[Command[_], T, E](
+      val command: Command[T],
+      val tag: Tag[E]
+  ) extends Suspend[Command, T, T, E]:
+    def isRoot: Boolean    = true
+    def apply(v: T): T < E = v
+  end Root
+
+  sealed abstract class Continue[Command[_], T, U, S](
+      s: Suspend[Command, T, ?, ?]
+  ) extends Suspend[Command, T, U, S]:
+    val command = s.command
+    val tag     = s.tag
+    def isRoot  = false
+  end Continue
+end Kyo
+
+abstract class Handler[Command[_], Result[_], E](using val tag: Tag[E]):
+  def pure[T](v: T): Result[T]
+  def apply[T, U, S](command: Command[T], k: T => U < (E & S)): Result[U] < S
+
+  def handle[T, S](value: T < (E & S)): Result[T] < S =
+    value match
+      case suspend: Suspend[Command, Any, T, S] @unchecked if suspend.tag.tag == tag.tag =>
+        apply(suspend.command, suspend.apply)
+
+      case suspend: Suspend[MX, Any, T, S] @unchecked =>
+        new Continue[MX, Any, Result[T], S](suspend):
+          def apply(v: Any) =
+            handle(suspend(v))
+
+      case v: T @unchecked =>
+        pure(v)
+end Handler
+
+abstract class SimpleHandler[Command[_], E](using override val tag: Tag[E]) extends Handler[Command, Id, E]:
+  def pure[T](v: T): Id[T] = v
+  def apply[T, U, S](command: Command[T], k: T => U < (E & S)): U < S
+end SimpleHandler
+
+abstract class Effect[E](using val tag: Tag[E]):
+  type Command[_]
+  def suspend[T](command: Command[T]): T < E = Root(command, tag)
+end Effect
+
+////////////
+// ABORTS //
+////////////
+
+class Aborts[E: Tag] extends Effect[Aborts[E]]:
+  override type Command[T] = Left[E, Nothing]
+
+object Aborts:
+
+  def abort[E: Tag](value: E): Nothing < Aborts[E] =
+    Aborts[E].suspend(Left(value))
+
+  def fromEither[E: Tag, T, S](either: Either[E, T] < S): T < (Aborts[E] & S) =
+    either.map {
+      case Right(value) => value
+      case Left(e)      => abort(e)
+    }
+
+  def handler[E: Tag] = new Handler[Const[Left[E, Nothing]], Either[E, *], Aborts[E]]:
+    def pure[T](v: T): Either[E, T] = Right(v)
+
+    def apply[T, U, S](command: Left[E, Nothing], k: T => U < (Aborts[E] & S)): Either[E, U] < S =
+      command
+
+  def run[E: Tag, T, S](value: T < (Aborts[E] & S)): Either[E, T] < S =
+    handler[E].handle(value)
+
+//////////
+// ENVS //
+//////////
+
+class Envs[R: Tag] extends Effect[Envs[R]]:
+  override type Command[T] = Envs.Input[T]
+
+object Envs:
+  object Input
+  type Input[T] = Input.type
+
+  def get[R: Tag]: R < Envs[R] = Envs[R].suspend(Input)
+
+  def run[R: Tag, T, S](env: R)(value: T < (Envs[R] & S)): T < S =
+    val handler = new SimpleHandler[Input, Envs[R]]:
+      def apply[T, U, S](command: Input[T], k: T => U < (Envs[R] & S)): U < S =
+        this.handle(k(env.asInstanceOf[T]))
+
+    handler.handle(value)
+
+/////////////
+// EXAMPLE //
+/////////////
+
+object Example extends App:
+
+  val program: String < (Envs[Int] & Aborts[String] & Envs[String]) =
+    for
+      number <- Envs.get[Int]
+      _      <- Aborts.abort(s"DON'T BE SO NEGATIVE! ${number}").when(number < 0)
+      string <- Envs.get[String]
+    yield string * number
+
+  val result: Either[String, String] < Any =
+    Aborts.run(Envs.run("LO")(Envs.run(-11)(program)))
+
+  println(result)
