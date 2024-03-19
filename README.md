@@ -15,6 +15,9 @@ Korean Tralslated Version
 
 > Kyo의 접근 방식은 대수적 이펙트를 기반으로 합니다. 대수적 이펙트는 비교적 새로운 개념입니다. 기본적으로 연구자들은 방정식으로 정의되는 이펙트에 대한 일반적인 의미론을 찾는 데 성공했습니다. 이 사실은 프로그래밍 언어 연구자들이 이펙트를 더 잘 이해하고 대수적 이펙트가 자유롭게 합성될 수 있음을 증명할 수 있게 해주었습니다. 이러한 합성 가능성은 모나드 변환기가 필요하지 않기 때문에 cats-effets와 ZIO에서 제공하는 기존의 모나딕 이펙트보다 질적으로 우수합니다.
 
+# from official readme.md
+
+> Drawing inspiration from ZIO's effect rotation, Kyo takes a more generalized approach. While ZIO restricts effects to two channels, dependency injection and short-circuiting, Kyo allows for an arbitrary number of effectful channels. This enhancement gives developers greater flexibility in effect management, while also simplifying Kyo's internal codebase through more principled design patterns.
 
 
 
